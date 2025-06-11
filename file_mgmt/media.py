@@ -10,8 +10,8 @@ This file contains functions for file media manipulations for the common file fo
 Imported Modules
 ================
 '''
-import os
 import zipfile
+from pathlib import Path
 from common import generate_uuid
 from file_mgmt.common import update_json_file_data, read_json_file_data
 from PIL import Image, ExifTags
@@ -25,7 +25,7 @@ Functions
 def add_asset(filename, assetpath, assetfile):
     assetsjson, status = read_json_file_data(filename, 'assets')
 	#  Guess the filetype
-    filetype = assetfile.rsplit('.', 1)[1].lower()
+    filetype = Path(assetfile).suffix[1:].lower()  # Remove the dot from extension
 	#  Create new asset ID
     asset_id = generate_uuid()
 	#  Create new asset structure
@@ -41,8 +41,8 @@ def add_asset(filename, assetpath, assetfile):
 		#  Update cookfile with new asset information
         update_json_file_data(assetsjson, filename, 'assets')
 		#  Rename asset file to [asset_id].[filetype]
-        fullsize = f'{assetpath}/{asset_id}.{filetype}'
-        os.rename(os.path.join(assetpath, assetfile), fullsize)
+        fullsize = Path(assetpath) / f'{asset_id}.{filetype}'
+        (Path(assetpath) / assetfile).rename(fullsize)
 
 		#  Rotate image if needed
         _rotate_image(assetpath, asset_id, filetype)
@@ -71,7 +71,7 @@ def _rotate_image(filepath, asset_id, filetype):
 
 	try:
 		#  Load image into memory
-		imagefile = f'{filepath}/{asset_id}.{filetype}'
+		imagefile = filepath / f'{asset_id}.{filetype}'
 		image = Image.open(imagefile)
 
 		for orientation in ExifTags.TAGS.keys():
@@ -108,7 +108,7 @@ def _create_thumbnail(filepath, asset_id, filetype, crop=True):
 	#  Import PIL for image manipulations
 	from PIL import Image
 	#  Load image into memory
-	imagefile = f'{filepath}/{asset_id}.{filetype}'
+	imagefile = filepath / f'{asset_id}.{filetype}'
 	image = Image.open(imagefile)
 	width, height = image.size
 
@@ -126,9 +126,9 @@ def _create_thumbnail(filepath, asset_id, filetype, crop=True):
 		image = image.resize((128, 128))
 
 	#  Save thumb image in filepath + /thumbs
-	if not os.path.exists(f'{filepath}/thumbs'):
-		os.mkdir(f'{filepath}/thumbs')
-	thumbpathname = f'{filepath}/thumbs/{asset_id}.{filetype}'
+	thumbs_dir = filepath / 'thumbs'
+	thumbs_dir.mkdir(exist_ok=True)
+	thumbpathname = thumbs_dir / f'{asset_id}.{filetype}'
 	image.save(thumbpathname)
 
 	return(thumbpathname, status)
@@ -138,7 +138,7 @@ def _resize_image(assetpath, asset_id, filetype, max_size=(800, 600)):
 	#  Import PIL for image manipulations
 	from PIL import Image, ImageOps
 	#  Load image into memory
-	imagefile = f'{assetpath}/{asset_id}.{filetype}'
+	imagefile = assetpath / f'{asset_id}.{filetype}'
 	image = Image.open(imagefile)
 	#  Resizes image to fit into max_size and maintains aspect ratio
 	image = ImageOps.contain(image, max_size)
@@ -164,23 +164,21 @@ def unpack_thumb(thumbname, filename):
 			thumb = archive.read(f'assets/thumbs/{thumbname}')  # Read bytes into variable
 			tmp_id = generate_uuid()
 
-			if not os.path.exists(f'/tmp/pifire'):
-				os.mkdir(f'/tmp/pifire')
+			tmp_pifire = Path('/tmp/pifire')
+			tmp_dir = tmp_pifire / tmp_id
 
-			if not os.path.exists(f'/tmp/pifire/{tmp_id}'):
-				os.mkdir(f'/tmp/pifire/{tmp_id}')
+			tmp_pifire.mkdir(exist_ok=True)
+			tmp_dir.mkdir(exist_ok=True)
 
-			#  Write fullsize image to disk
-			destination = open(f'/tmp/pifire/{tmp_id}/{thumbname}', "wb")  # Write bytes to proper destination
-			destination.write(thumb)
-			destination.close()
+			thumb_file = tmp_dir / thumbname
+			thumb_file.write_bytes(thumb)
 			path_filename = f'{tmp_id}/{thumbname}'
 
 			#  Create temporary folder for the thumbnail
-			if not os.path.exists('./static/img/tmp'):
-				os.mkdir(f'./static/img/tmp')
-			if not os.path.exists(f'./static/img/tmp/{tmp_id}'):
-				os.symlink(f'/tmp/pifire/{tmp_id}', f'./static/img/tmp/{tmp_id}')
+			tmp_thumb = Path('./static/img/tmp')
+			tmp_thumb.mkdir(exist_ok=True)
+			symlink_path = tmp_thumb / tmp_id
+			symlink_path.symlink_to(tmp_dir)
 
 	except:
 		path_filename = ''

@@ -12,77 +12,76 @@ Imported Modules
 ================
 '''
 import zipfile
-import os
 import json
 import tempfile
 import shutil
 
-HISTORY_FOLDER = './history/'  # Path to historical cook files
-RECIPE_FOLDER = './recipes/'  # Path to recipe files
+from pathlib import Path
+
+HISTORY_FOLDER = Path('./history/')  # Path to historical cook files
+RECIPE_FOLDER = Path('./recipes/')  # Path to recipe files
 
 '''
 Functions
 =========
 '''
 def read_json_file_data(filename, jsonfile, unpackassets=True):
-	'''
-	Read File JSON File data out of the zipped pifire file:
-		Must specify the file name, and the jsonfile element to be extracted (without the .json extension)
-	'''
-	status = 'OK'
-	
-	try:
-		with zipfile.ZipFile(filename, mode="r") as archive:
-			json_string = archive.read(jsonfile + '.json')
-			dictionary = json.loads(json_string)
-			# If this is the assets file, load the assets into the temporary folder
-			if jsonfile == 'assets' and unpackassets:
-				json_string = archive.read('metadata.json')
-				metadata = json.loads(json_string)
-				parent_id = metadata['id']  # Get parent id for this file and store all images in parent_id folder
+    '''
+    Read File JSON File data out of the zipped pifire file:
+        Must specify the file name, and the jsonfile element to be extracted (without the .json extension)
+    '''
+    status = 'OK'
+    
+    try:
+        with zipfile.ZipFile(filename, mode="r") as archive:
+            json_string = archive.read(jsonfile + '.json')
+            dictionary = json.loads(json_string)
+            
+            if jsonfile == 'assets' and unpackassets:
+                json_string = archive.read('metadata.json')
+                metadata = json.loads(json_string)
+                parent_id = metadata['id']
 
-				for asset in range(0, len(dictionary)):
-					#  Get asset file information
-					mediafile = dictionary[asset]['filename']
-					id = dictionary[asset]['id']
-					filetype = dictionary[asset]['type']
-					#  Read the file(s) into memory
-					data = archive.read(f'assets/{mediafile}')  # Read bytes into variable
-					thumb = archive.read(f'assets/thumbs/{mediafile}')  # Read bytes into variable
-					if not os.path.exists(f'/tmp/pifire'):
-						os.mkdir(f'/tmp/pifire')
-					if not os.path.exists(f'/tmp/pifire/{parent_id}'):
-						os.mkdir(f'/tmp/pifire/{parent_id}')
-					if not os.path.exists(f'/tmp/pifire/{parent_id}/thumbs'):
-						os.mkdir(f'/tmp/pifire/{parent_id}/thumbs')
-					#  Write fullsize image to disk
-					destination = open(f'/tmp/pifire/{parent_id}/{id}.{filetype}', "wb")  # Write bytes to proper destination
-					destination.write(data)
-					destination.close()
-					#  Write thumbnail image to disk
-					destination = open(f'/tmp/pifire/{parent_id}/thumbs/{id}.{filetype}', "wb")  # Write bytes to proper destination
-					destination.write(thumb)
-					destination.close()
+                for asset in range(0, len(dictionary)):
+                    mediafile = dictionary[asset]['filename']
+                    id = dictionary[asset]['id']
+                    filetype = dictionary[asset]['type']
+                    
+                    data = archive.read(f'assets/{mediafile}')
+                    thumb = archive.read(f'assets/thumbs/{mediafile}')
+                    
+                    tmp_pifire = Path('/tmp/pifire')
+                    parent_dir = tmp_pifire / parent_id
+                    thumbs_dir = parent_dir / 'thumbs'
+                    
+                    # Create all directories at once
+                    thumbs_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Write files using Path
+                    (parent_dir / f'{id}.{filetype}').write_bytes(data)
+                    (thumbs_dir / f'{id}.{filetype}').write_bytes(thumb)
 
-					if not os.path.exists('./static/img/tmp'):
-						os.mkdir(f'./static/img/tmp')
-					if not os.path.exists(f'./static/img/tmp/{parent_id}'):
-						os.symlink(f'/tmp/pifire/{parent_id}', f'./static/img/tmp/{parent_id}')
+                    static_tmp = Path('./static/img/tmp')
+                    static_parent = static_tmp / parent_id
+                    static_tmp.mkdir(exist_ok=True)
+                    
+                    if not static_parent.exists():
+                        static_parent.symlink_to(parent_dir)
 
-	except zipfile.BadZipFile as error:
-		status = f'Error: {error}'
-		dictionary = {}
-	except json.decoder.JSONDecodeError:
-		status = 'Error: JSON Decoding Error.'
-		dictionary = {}
-	except:
-		if jsonfile == 'assets':
-			status = 'Error: Error opening assets.'
-		else:
-			status = 'Error: Unspecified'
-		dictionary = {}
+    except zipfile.BadZipFile as error:
+        status = f'Error: {error}'
+        dictionary = {}
+    except json.decoder.JSONDecodeError:
+        status = 'Error: JSON Decoding Error.'
+        dictionary = {}
+    except Exception as e:
+        if jsonfile == 'assets':
+            status = f'Error: Error opening assets: {str(e)}'
+        else:
+            status = f'Error: Unspecified: {str(e)}'
+        dictionary = {}
 
-	return(dictionary, status)
+    return dictionary, status
 
 def update_json_file_data(filedata, filename, jsonfile):
 	'''
@@ -95,22 +94,22 @@ def update_json_file_data(filedata, filename, jsonfile):
 	# Submitted by StackOverflow user Sebdelsol
 
 	# Start by creating a temporary file without the jsonfile that is being edited
-	tmpfd, tmpname = tempfile.mkstemp(dir=os.path.dirname(filename))
-	os.close(tmpfd)
+	tmpname = tempfile.mkstemp(dir=Path(filename).parent)[1]
+	Path(tmpname).unlink()
 	try:
 		# Create a temp copy of the archive without filename            
 		with zipfile.ZipFile(filename, 'r') as zin:
 			with zipfile.ZipFile(tmpname, 'w') as zout:
 				zout.comment = zin.comment # Preserve the zip metadata comment
 				for item in zin.infolist():
-					if item.filename != jsonfilename:
+					if Path(item.filename).name != jsonfilename:
 						zout.writestr(item, zin.read(item.filename))
 		# Replace original with the temp archive
-		os.remove(filename)
-		os.rename(tmpname, filename)
+		Path(filename).unlink()
+		Path(tmpname).rename(Path(filename))
 		# Now add updated JSON file with its new data
 		with zipfile.ZipFile(filename, mode='a', compression=zipfile.ZIP_DEFLATED) as zf:
-			zf.writestr(jsonfilename, json.dumps(filedata, indent=2, sort_keys=True))
+			zf.writestr(Path(jsonfilename).name, json.dumps(filedata, indent=2, sort_keys=True))
 
 	except zipfile.BadZipFile as error:
 		status = f'Error: {error}'
@@ -128,25 +127,25 @@ def fixup_assets(filename, jsondata):
 	thumblist = []
 	with zipfile.ZipFile(filename, mode="r") as archive:
 		for item in archive.infolist():
-			if 'assets' in item.filename:
-				if item.filename == 'assets/':
+			if 'assets' in Path(item.filename).name:
+				if Path(item.filename).name == 'assets/':
 					pass
-				elif item.filename == 'assets.json':
+				elif Path(item.filename).name == 'assets.json':
 					pass
-				elif item.filename == 'assets/thumbs/':
+				elif Path(item.filename).name == 'assets/thumbs/':
 					pass
-				elif 'thumbs' in item.filename:
-					thumblist.append(item.filename.replace('assets/thumbs/', ''))
+				elif 'thumbs' in Path(item.filename).name:
+					thumblist.append(Path(item.filename).name)
 				else: 
-					assetlist.append(item.filename.replace('assets/', ''))
+					assetlist.append(Path(item.filename).name)
 	
 	#   - Loop through asset list / compare with file list
 	for asset in jsondata['assets']:
-		if asset['filename'] not in assetlist:
+		if Path(asset['filename']).name not in assetlist:
 			jsondata['assets'].remove(asset)
 		else: 
 			for item in assetlist:
-				if asset['filename'] in item:
+				if Path(asset['filename']).name in item:
 					assetlist.remove(item)
 					break 
 
@@ -163,7 +162,7 @@ def fixup_assets(filename, jsondata):
 	thumbnail = jsondata['metadata']['thumbnail']
 	assetlist = []
 	for asset in jsondata['assets']:
-		assetlist.append(asset['filename'])
+		assetlist.append(Path(asset['filename']).name)
 
 	if thumbnail != '' and thumbnail not in assetlist:
 		jsondata['metadata']['thumbnail'] = ''
@@ -226,7 +225,7 @@ def remove_assets(filename, assetlist, filetype='cookfile'):
 	modified = False 
 	tempassets = assets.copy()
 	for asset in tempassets:
-		if asset['filename'] in assetlist:
+		if Path(asset['filename']).name in assetlist:
 			assets.remove(asset)
 			modified = True
 	if modified:
@@ -234,25 +233,25 @@ def remove_assets(filename, assetlist, filetype='cookfile'):
 
 	# Traverse list of asset files from the compressed file, remove asset and thumb
 	try: 
-		tmpdir = f'/tmp/pifire/{metadata["id"]}'
-		if not os.path.exists(tmpdir):
-			os.mkdir(tmpdir)
+		tmpdir = Path('/tmp/pifire') / metadata["id"]
+		tmpdir.mkdir(parents=True, exist_ok=True)
+		
 		with zipfile.ZipFile(filename, mode="r") as archive:
-			new_archive = zipfile.ZipFile (f'{tmpdir}/new.pifire', 'w', zipfile.ZIP_DEFLATED)
+			new_archive = zipfile.ZipFile(str(tmpdir / 'new.pifire'), 'w', zipfile.ZIP_DEFLATED)
 			for item in archive.infolist():
 				remove = False 
 				for asset in assetlist:
-					if asset in item.filename: 
+					if asset in item.filename:  # Use original filename string
 						remove = True
 						break 
 				if not remove:
-					buffer = archive.read(item.filename)
-					new_archive.writestr(item, buffer)
+					buffer = archive.read(item.filename)  # Use original filename string
+					new_archive.writestr(item.filename, buffer)  # Use original filename string
 			new_archive.close()
 
-		os.remove(filename)
-		shutil.move(f'{tmpdir}/new.pifire', filename)
-	except:
-		status = "Error:  Error removing assets from file."
+		Path(filename).unlink()
+		(tmpdir / 'new.pifire').rename(filename)
+	except Exception as e:
+		status = f"Error: Error removing assets from file: {str(e)}"
 
 	return status

@@ -12,15 +12,15 @@ Imported Modules
 ================
 '''
 import datetime
-import os
 import json
+import shutil
 import zipfile
-import pathlib
+from pathlib import Path
 
 from common import read_settings, generate_uuid, convert_temp
 from file_mgmt.common import read_json_file_data
 
-RECIPE_FOLDER = './recipes/'  # Path to recipe files
+RECIPE_FOLDER = Path('./recipes/')  # Path to recipe files
 
 '''
 Functions
@@ -155,31 +155,28 @@ def create_recipefile():
 
     # 1. Create all JSON data files
     files_list = ['metadata', 'recipe', 'comments', 'assets']
-    if not os.path.exists(RECIPE_FOLDER):
-        os.mkdir(RECIPE_FOLDER)
-    os.mkdir(f'{RECIPE_FOLDER}{title}')  # Make temporary folder for all recipe files
+    RECIPE_FOLDER.mkdir(exist_ok=True)
+    recipe_dir = RECIPE_FOLDER / title
+    recipe_dir.mkdir(exist_ok=True)
     
     for item in files_list:
         json_data_string = json.dumps(file_data[item], indent=2, sort_keys=True)
-        filename = f'{RECIPE_FOLDER}{title}/{item}.json'
-        with open(filename, 'w+') as recipe_file:
-            recipe_file.write(json_data_string)
+        filename = recipe_dir / f'{item}.json'
+        filename.write_text(json_data_string)
     
     # 2. Create empty data folder(s) & add default data 
-    os.mkdir(f'{RECIPE_FOLDER}{title}/assets')
-    os.mkdir(f'{RECIPE_FOLDER}{title}/assets/thumbs')
+    (recipe_dir / 'assets').mkdir(exist_ok=True)
+    (recipe_dir / 'assets' / 'thumbs').mkdir(exist_ok=True)
 
     # 3. Create ZIP file of the folder 
-    directory = pathlib.Path(f'{RECIPE_FOLDER}{title}/')
-    filename = f'{RECIPE_FOLDER}{title}.pfrecipe'
+    filename = RECIPE_FOLDER / f'{title}.pfrecipe'
 
     with zipfile.ZipFile(filename, "w", zipfile.ZIP_DEFLATED) as archive:
-        for file_path in directory.rglob("*"):
-            archive.write(file_path, arcname=file_path.relative_to(directory))
+        for file_path in recipe_dir.rglob("*"):
+            archive.write(file_path, arcname=file_path.relative_to(recipe_dir))
 
     # 4. Cleanup temporary files
-    command = f'rm -rf {RECIPE_FOLDER}{title}'
-    os.system(command)
+    shutil.rmtree(recipe_dir)
     return filename 
 
 def read_recipefile(filename):

@@ -17,7 +17,7 @@
 
 import argparse
 import logging
-import os 
+from pathlib import Path
 import json 
 
 '''
@@ -362,9 +362,9 @@ def os_version():
 def create_file(filename, lines):
 	result = f'\n - Attempting to write data to {filename}: '
 	try:
-		with open(filename, "w") as file:
-			for line in lines:
-				file.write(line)
+		file_path = Path(filename)
+		file_path.parent.mkdir(parents=True, exist_ok=True)
+		file_path.write_text('\n'.join(lines))
 		result += f' SUCCESS (creating file {filename}) '
 	except:
 		result += f' FAILED (creating file {filename}) '
@@ -373,9 +373,10 @@ def create_file(filename, lines):
 def append_file(filename, lines):
 	result = f'\n - Attempting to append data to {filename}: '
 	try:
-		with open(filename, "a+") as file:
-			for line in lines:
-				file.write(line)
+		file_path = Path(filename)
+		file_path.parent.mkdir(parents=True, exist_ok=True)
+		with file_path.open('a') as f:
+			f.write(lines)
 		result += f' SUCCESS (appending file {filename}) '
 	except:
 		result += f' FAILED (appending file {filename}) '
@@ -404,10 +405,8 @@ def remove_hashtag(text):
 
 def read_generic_json(filename):
 	try:
-		json_file = os.fdopen(os.open(filename, os.O_RDONLY))
-		json_data = json_file.read()
+		json_data = Path(filename).read_text()
 		dictionary = json.loads(json_data)
-		json_file.close()
 	except: 
 		dictionary = {}
 		event = f'An error occurred loading {filename} '

@@ -22,6 +22,7 @@ Description: This script will start at boot, initialize the relays and
 import logging
 import importlib
 import atexit
+import subprocess
 from common import *  # Common Module for WebUI and Control Program
 from common.process_mon import Process_Monitor
 from common.redis_queue import RedisQueue
@@ -1377,7 +1378,7 @@ while True:
 			_next_mode(control['next_mode'])			
 			if settings['shutdown']['auto_power_off']:
 				eventLogger.info('Shutdown mode ended powering off grill')
-				os.system("sleep 3 && sudo shutdown -h now &")
+				subprocess.Popen(['sleep', '3', '&&', 'sudo', 'shutdown', '-h', 'now'])
 
 		# Monitor (monitor the OEM controller)
 		elif control['mode'] == 'Monitor':

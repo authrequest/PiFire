@@ -17,13 +17,15 @@ Description: This library provides functions that are common to
 import time
 import datetime
 import os
-import io
+import shutil
+import subprocess
 import json
 import math
 import redis
 import uuid
 import random
 import logging
+from pathlib import Path
 from collections.abc import Mapping
 from ratelimitingfilter import RateLimitingFilter
 from common.redis_queue import RedisQueue
@@ -36,7 +38,8 @@ from common.redis_queue import RedisQueue
  Constants and Globals
 ==============================================================================
 '''
-BACKUP_PATH = './backups/'  # Path to backups of settings.json, pelletdb.json
+BACKUP_PATH = Path('./backups/')  # Path to backups of settings.json, pelletdb.json
+LOGS_PATH = Path('./logs/')
 
 # Set of default colors for charts.  Contains list of tuples (primary color, secondary color). 
 COLOR_LIST = [
@@ -59,6 +62,7 @@ cmdsts = redis.StrictRedis('localhost', 6379, charset="utf-8", decode_responses=
 '''
 def create_logger(name, filename='./logs/pifire.log', messageformat='%(asctime)s | %(levelname)s | %(message)s', level=logging.INFO):
 	'''Create or Get Existing Logger'''
+	LOGS_PATH.mkdir(exist_ok=True)
 	logger = logging.getLogger(name)
 	''' 
 		If the logger does not exist, create one. Else return the logger. 
@@ -104,7 +108,7 @@ def default_settings():
 		'venv' : False,  # Set to True if running in virtual environment (needed for Raspberry Pi OS Bookworm)
 	}
 
-	if os.path.exists('bin'):
+	if Path('bin').exists():
 		settings['globals']['venv'] = True 
 
 	""" The following are platform related settings, such as pin assignments, etc. """
@@ -992,10 +996,8 @@ def read_settings(filename='settings.json', init=False, retry_count=0):
 	"""
 
 	try:
-		json_data_file = os.fdopen(os.open(filename, os.O_RDONLY))
-		json_data_string = json_data_file.read()
+		json_data_string = Path(filename).read_text()
 		settings = json.loads(json_data_string)
-		json_data_file.close()
 
 	except(IOError, OSError):
 		""" Settings file not found, create a new default settings file """
@@ -1006,7 +1008,6 @@ def read_settings(filename='settings.json', init=False, retry_count=0):
 		# A ValueError Exception occurs when multiple accesses collide, this code attempts a retry.
 		event = 'ERROR: Value Error Exception - JSONDecodeError reading settings.json'
 		write_log(event)
-		json_data_file.close()
 		# Retry Reading Settings
 		if retry_count < 5: 
 			settings = read_settings(filename=filename, retry_count=retry_count+1)
@@ -1081,15 +1082,19 @@ def write_settings(settings):
 	settings['lastupdated']['time'] = math.trunc(time.time())
 
 	json_data_string = json.dumps(settings, indent=2, sort_keys=True)
-	with open("settings.json", 'w') as settings_file:
-		settings_file.write(json_data_string)
+	Path('settings.json').write_text(json_data_string)
 
 def backup_settings():
 	# Copy current settings file to a backup copy in /[BACKUP_PATH]/PiFire_[DATE]_[TIME].json 
 	time_now = datetime.datetime.now()
 	time_str = time_now.strftime('%m-%d-%y_%H%M%S') # Truncate the microseconds
-	backup_file = BACKUP_PATH + 'PiFire_' + time_str + '.json'
-	os.system(f'cp settings.json {backup_file}')
+	backup_file = BACKUP_PATH / f'PiFire_{time_str}.json'
+
+	# Create backup directory if it doesn't exist
+	BACKUP_PATH.mkdir(exist_ok=True)
+	
+	# Copy the current settings file to the backup file
+	shutil.copy2('settings.json', backup_file)
 	# Save a path to the backup copy in the updater_manifest.json
 	backup_manifest = read_generic_json('./backups/manifest.json')
 	if backup_manifest == {}:
@@ -1097,6 +1102,10 @@ def backup_settings():
 			'server_settings' : {}
 		}
 		write_generic_json(backup_manifest, './backups/manifest.json')
+	
+	if backup_manifest.get('server_settings', None) == None:
+		''' If the structure doesn't exist, create it. '''
+		backup_manifest['server_settings'] = { 'current' : None }
 
 	settings = read_generic_json('settings.json')
 	server_version = settings['versions']['server']
@@ -1269,10 +1278,8 @@ def read_pellet_db(filename='pelletdb.json'):
 
 	# Read all lines of pelletdb.json into a list(array)
 	try:
-		json_data_file = os.fdopen(os.open(filename, os.O_RDONLY))
-		json_data_string = json_data_file.read()
+		json_data_string = Path(filename).read_text()
 		pelletdb_struct = json.loads(json_data_string)
-		json_data_file.close()
 	except(IOError, OSError):
 		# Issue with reading JSON, so create one/write new one
 		write_pellet_db(pelletdb)
@@ -1304,8 +1311,7 @@ def write_pellet_db(pelletdb):
 	:param pelletdb: Pellet Database
 	"""
 	json_data_string = json.dumps(pelletdb, indent=2, sort_keys=True)
-	with open("pelletdb.json", 'w') as json_file:
-		json_file.write(json_data_string)
+	Path("pelletdb.json").write_text(json_data_string)
 
 def backup_pellet_db(action='backup'):
 	''' Backup & Restore Pellet Database '''
@@ -1326,8 +1332,14 @@ def backup_pellet_db(action='backup'):
 	if action == 'backup':
 		time_now = datetime.datetime.now()
 		time_str = time_now.strftime('%m-%d-%y_%H%M%S') # Truncate the microseconds
-		backup_file = BACKUP_PATH + 'PelletDB_' + time_str + '.json'
-		os.system(f'cp pelletdb.json {backup_file}')
+		backup_file = BACKUP_PATH / f'PelletDB_{time_str}.json'
+
+		# Create backup directory if it doesn't exist
+		BACKUP_PATH.mkdir(exist_ok=True)
+
+		# Read current pelletdb
+		pelletdb = read_pellet_db()
+		backup_file.write_text(json.dumps(pelletdb, indent=2, sort_keys=True))
 		backup_manifest['pelletdb']['current'] = backup_file 
 		message = f'Pellet DB has been backed up to the following file: {backup_file}'
 		write_generic_json(backup_manifest, './backups/manifest.json')
@@ -1363,14 +1375,12 @@ def read_events(legacy=True):
 	:return: (event_list, num_events)
 	"""
 	# Read all lines of events.log into a list(array)
+	events_file = Path('/tmp/events.log')
 	try:
-		with open('/tmp/events.log') as event_file:
-			event_lines = event_file.readlines()
-			event_file.close()
+		event_lines = events_file.read_text().splitlines()
 	# If file not found error, then create events.log file
 	except(IOError, OSError):
-		event_file = open('/tmp/events.log', "w")
-		event_file.close()
+		events_file.touch()
 		event_lines = []
 
 	# Initialize event_list list
@@ -1398,16 +1408,13 @@ def read_events(legacy=True):
 def read_log_file(filepath):
 	# Read all lines of events.log into a list(array)
 	try:
-		with open(filepath) as log_file:
-			log_file_lines = log_file.readlines()
-			log_file.close()
+		log_file = Path(filepath)
+		return log_file.read_text().splitlines()
 	# If file not found error, then create events.log file
 	except(IOError, OSError):
 		event = f'Unable to open log file: {filepath}'
 		write_log(event)
 		return []
-
-	return log_file_lines 
 
 def add_line_numbers(event_list):
 	event_lines = []
@@ -1743,21 +1750,21 @@ def restart_scripts():
 	Restart the Control and WebApp Scripts
 	"""
 	if is_real_hardware():
-		os.system("sleep 3 && sudo service supervisor restart &")
+		subprocess.Popen(['sleep', '3', '&&', 'sudo', 'service', 'supervisor', 'restart'])
 
 def reboot_system():
 	"""
 	Reboot the system
 	"""
 	if is_real_hardware():
-		os.system("sleep 3 && sudo reboot &")
+		subprocess.Popen(['sleep', '3', '&&', 'sudo', 'reboot'])
 
 def shutdown_system():
 	"""
 	Shutdown the system
 	"""
 	if is_real_hardware():
-		os.system("sleep 3 && sudo shutdown -h now &")
+		subprocess.Popen(['sleep', '3', '&&', 'sudo', 'shutdown', '-h', 'now'])
 
 def read_wizard(filename='wizard/wizard_manifest.json'):
 	"""
@@ -1767,10 +1774,8 @@ def read_wizard(filename='wizard/wizard_manifest.json'):
 	:return: Wizard Data
 	"""
 	try:
-		json_data_file = os.fdopen(os.open(filename, os.O_RDONLY))
-		json_data_string = json_data_file.read()
+		json_data_string = Path(filename).read_text()
 		wizard = json.loads(json_data_string)
-		json_data_file.close()
 	except(IOError, OSError):
 		event = 'ERROR: Could not read from wizard manifest.'
 		write_log(event)
@@ -1782,7 +1787,6 @@ def read_wizard(filename='wizard/wizard_manifest.json'):
 		# A ValueError Exception occurs when multiple accesses collide, this code attempts a retry.
 		event = 'ERROR: Value Error Exception - JSONDecodeError reading wizard_manifest.json'
 		write_log(event)
-		json_data_file.close()
 		# Retry Reading Settings
 		wizard = read_wizard(filename=filename)
 
@@ -1841,10 +1845,8 @@ def read_updater_manifest(filename='updater/updater_manifest.json'):
 	:return: Dependencies
 	"""
 	try:
-		json_data_file = os.fdopen(os.open(filename, os.O_RDONLY))
-		json_data_string = json_data_file.read()
+		json_data_string = Path(filename).read_text()
 		dependencies = json.loads(json_data_string)
-		json_data_file.close()
 	except(IOError, OSError):
 		event = 'ERROR: Could not read from updater manifest.'
 		write_log(event)
@@ -1856,7 +1858,6 @@ def read_updater_manifest(filename='updater/updater_manifest.json'):
 		# A ValueError Exception occurs when multiple accesses collide, this code attempts a retry.
 		event = 'ERROR: Value Error Exception - JSONDecodeError reading updater_manifest.json'
 		write_log(event)
-		json_data_file.close()
 		# Retry Reading Settings
 		dependencies = read_updater_manifest(filename=filename)
 
@@ -1974,26 +1975,23 @@ def seconds_to_string(seconds):
 	return time_string
 
 def read_generic_json(filename):
-	try:
-		json_file = os.fdopen(os.open(filename, os.O_RDONLY))
-		json_data = json_file.read()
-		dictionary = json.loads(json_data)
-		json_file.close()
-	except: 
-		dictionary = {}
-		event = f'An error occurred loading {filename}'
-		write_log(event)
-
-	return dictionary
+    try:
+        file_path = Path(filename)
+        dictionary = json.loads(file_path.read_text())
+    except Exception:
+        dictionary = {}
+        event = f'An error occurred loading {filename}'
+        write_log(event)
+    return dictionary
 
 def write_generic_json(dictionary, filename):
-	try: 
-		json_data_string = json.dumps(dictionary, indent=2, sort_keys=True)
-		with open(filename, 'w') as json_file:
-			json_file.write(json_data_string)
-	except:
-		event = f'Error writing generic json file ({filename})'
-		write_log(event)
+    try:
+        file_path = Path(filename)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(json.dumps(dictionary, indent=2, sort_keys=True))
+    except Exception:
+        event = f'Error writing generic json file ({filename})'
+        write_log(event)
 
 def write_status(status):
 	"""

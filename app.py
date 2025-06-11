@@ -27,7 +27,8 @@ from werkzeug.utils import secure_filename
 from collections.abc import Mapping
 import threading
 import zipfile
-import pathlib
+import subprocess
+from pathlib import Path
 from threading import Thread
 from datetime import datetime
 from updater import *  # Library for doing project updates from GitHub
@@ -42,11 +43,11 @@ from file_mgmt.recipes import read_recipefile, create_recipefile
 ==============================================================================
 '''
 
-BACKUP_PATH = './backups/'  # Path to backups of settings.json, pelletdb.json
+BACKUP_PATH = Path('./backups')  # Path to backups of settings.json, pelletdb.json
 UPLOAD_FOLDER = BACKUP_PATH  # Point uploads to the backup path
-HISTORY_FOLDER = './history/'  # Path to historical cook files
-RECIPE_FOLDER = './recipes/'  # Path to recipe files 
-LOGS_FOLDER = './logs/'  # Path to log files 
+HISTORY_FOLDER = Path('./history')  # Path to historical cook files
+RECIPE_FOLDER = Path('./recipes')  # Path to recipe files 
+LOGS_FOLDER = Path('./logs')  # Path to log files 
 ALLOWED_EXTENSIONS = {'json', 'pifire', 'pfrecipe', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'log'}
 server_status = 'available'
 
@@ -213,7 +214,7 @@ def history_page(action=None):
 		if(action == 'cookfile'):
 			if('delcookfile' in response):
 				filename = './history/' + response["delcookfile"]
-				os.remove(filename)
+				Path(filename).unlink()
 				return redirect('/history')
 			if('opencookfile' in response):
 				cookfilename = HISTORY_FOLDER + response['opencookfile']
@@ -465,7 +466,7 @@ def cookfiledata(action=None):
 				# empty file without a filename.
 				if remotefile and _allowed_file(remotefile.filename):
 					filename = secure_filename(remotefile.filename)
-					remotefile.save(os.path.join(app.config['HISTORY_FOLDER'], filename))
+					remotefile.save(Path(app.config['HISTORY_FOLDER']) / filename)
 				else:
 					errors.append('Disallowed File Upload.')
 				return redirect('/history')
@@ -523,7 +524,7 @@ def cookfiledata(action=None):
 
 					if remotefile and _allowed_file(remotefile.filename):
 						filename = secure_filename(remotefile.filename)
-						pathfile = os.path.join(tmp_path, filename)
+						pathfile = Path(tmp_path) / filename
 						remotefile.save(pathfile)
 						asset_id, asset_filetype = add_asset(cookfilename, tmp_path, filename)
 						if 'ulthumbfn' in requestform:
@@ -1043,9 +1044,8 @@ def logs_page(action=None):
 	global settings
 	control = read_control()
 	# Get list of log files 
-	if not os.path.exists(LOGS_FOLDER):
-		os.mkdir(LOGS_FOLDER)
-	log_file_list = os.listdir(LOGS_FOLDER)
+	LOGS_FOLDER.mkdir(exist_ok=True)
+	log_file_list = [f for f in LOGS_FOLDER.iterdir() if f.is_file()]
 	for file in log_file_list:
 		if not _allowed_file(file):
 			log_file_list.remove(file)
@@ -1276,7 +1276,7 @@ def recipes_data(filename=None):
 			if remote_file.filename != '':
 				if remote_file and _allowed_file(remote_file.filename):
 					filename = secure_filename(remote_file.filename)
-					remote_file.save(os.path.join(app.config['RECIPE_FOLDER'], filename))
+					remote_file.save(Path(app.config['RECIPE_FOLDER']) / filename)
 					result = "success"
 			return jsonify({ 'result' : result})
 		if('uploadassets' in requestform):
@@ -1291,13 +1291,12 @@ def recipes_data(filename=None):
 					# Load the Recipe File 
 					recipe_data, status = read_recipefile(filepath)
 					parent_id = recipe_data['metadata']['id']
-					tmp_path = f'/tmp/pifire/{parent_id}'
-					if not os.path.exists(tmp_path):
-						os.mkdir(tmp_path)
+					tmp_path = Path('/tmp/pifire') / parent_id
+					tmp_path.mkdir(exist_ok=True)
 
 					if remotefile and _allowed_file(remotefile.filename):
 						asset_filename = secure_filename(remotefile.filename)
-						pathfile = os.path.join(tmp_path, asset_filename)
+						pathfile = Path(tmp_path) / asset_filename
 						remotefile.save(pathfile)
 						add_asset(filepath, tmp_path, asset_filename)
 					else:
@@ -1551,7 +1550,7 @@ def recipes_data(filename=None):
 		if('deletefile' in requestjson): 
 			filename = requestjson['filename']
 			filepath = f'{RECIPE_FOLDER}{filename}'
-			os.system(f'rm {filepath}')
+			Path(filepath).unlink()
 			return jsonify({'result' : 'success'})
 		if('assetchange' in requestjson):
 			filename = requestjson['filename']
@@ -2221,9 +2220,8 @@ def admin_page(action=None):
 	warnings = []
 	success = []
 
-	if not os.path.exists(BACKUP_PATH):
-		os.mkdir(BACKUP_PATH)
-	files = os.listdir(BACKUP_PATH)
+	BACKUP_PATH.mkdir(exist_ok=True)
+	files = [f.name for f in Path(BACKUP_PATH).iterdir()]
 	for file in files:
 		if not _allowed_file(file):
 			files.remove(file)
@@ -2276,12 +2274,12 @@ def admin_page(action=None):
 		if 'clearevents' in response:
 			if response['clearevents'] == 'true':
 				write_log('Clearing Events Log.')
-				os.system('rm /tmp/events.log')
+				subprocess.run(['rm', '-f', '/tmp/events.log'])
 
 		if 'clearpelletdb' in response:
 			if response['clearpelletdb'] == 'true':
 				write_log('Clearing Pellet Database.')
-				os.system('rm pelletdb.json')
+				subprocess.run(['rm', '-f', 'pelletdb.json']) 
 
 		if 'clearpelletdblog' in response:
 			if response['clearpelletdblog'] == 'true':
@@ -2294,8 +2292,7 @@ def admin_page(action=None):
 				write_log('Resetting Settings, Control and History to factory defaults.')
 				read_history(0, flushhistory=True)
 				read_control(flush=True)
-				os.system('rm settings.json')
-				os.system('rm pelletdb.json')
+				subprocess.run(['rm', '-f', 'settings.json', 'pelletdb.json'])
 				settings = default_settings()
 				control = default_control()
 				write_settings(settings)
@@ -2312,7 +2309,9 @@ def admin_page(action=None):
 		if 'delete_logs' in response:
 			# Delete *.log files in logs/
 			try:
-				os.system('rm logs/*.log')
+				log_files = glob.glob('logs/*.log')
+				for log_file in log_files:
+					subprocess.run(['rm', log_file])
 				success.append('Log files deleted.')
 			except:
 				errors.append('There was an error restoring pellet database.  Restore file wasn\'t specified or found')
@@ -2346,7 +2345,7 @@ def admin_page(action=None):
 				# empty file without a filename.
 				if remote_file and _allowed_file(remote_file.filename):
 					filename = secure_filename(remote_file.filename)
-					remote_file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+					remote_file.save(Path(app.config['UPLOAD_FOLDER']) / filename)
 					success.append('Successfully restored settings.')
 					new_settings = read_settings(filename=BACKUP_PATH+filename)
 					write_settings(new_settings)
@@ -2377,7 +2376,7 @@ def admin_page(action=None):
 				# empty file without a filename.
 				if remote_file and _allowed_file(remote_file.filename):
 					filename = secure_filename(remote_file.filename)
-					remote_file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+					remote_file.save(Path(app.config['UPLOAD_FOLDER']) / filename)
 					success.append('Successfully restored pellet database.')
 					pelletdb = read_pellet_db(filename=BACKUP_PATH+filename)
 					write_pellet_db(pelletdb)
@@ -2600,7 +2599,7 @@ def wizard(action=None):
 				wizardInstallInfo = prepare_wizard_data(r)
 				store_wizard_install_info(wizardInstallInfo)
 				set_wizard_install_status(0, 'Starting Install...', '')
-				os.system(f'{python_exec} wizard.py &')	# Kickoff Installation
+				subprocess.Popen([python_exec, 'wizard.py'])	# Kickoff Installation
 				return render_template('wizard-finish.html', page_theme=settings['globals']['page_theme'],
 									grill_name=settings['globals']['grill_name'], wizardData=wizardData)
 
@@ -3226,7 +3225,7 @@ def update_page(action=None):
 
 		if 'update_remote_branches' in r:
 			if is_real_hardware():
-				os.system(f'{python_exec} %s %s &' % ('updater.py', '-r'))	 # Update branches from remote 
+				subprocess.Popen([python_exec, 'updater.py', '-r'])	 # Update branches from remote 
 				time.sleep(5)  # Artificial delay to avoid race condition
 			return redirect('/update')
 
@@ -3241,7 +3240,7 @@ def update_page(action=None):
 									   grill_name=settings['globals']['grill_name'])
 			else:
 				set_updater_install_status(0, 'Starting Branch Change...', '')
-				os.system(f'{python_exec} updater.py -b {r["branch_target"]} &')	# Kickoff Branch Change
+				subprocess.Popen([python_exec, 'updater.py', '-b', r["branch_target"]])	# Kickoff Branch Change
 				return render_template('updater-status.html', page_theme=settings['globals']['page_theme'],
 									   grill_name=settings['globals']['grill_name'])
 
@@ -3249,7 +3248,7 @@ def update_page(action=None):
 			control = read_control()
 			if control['mode'] == 'Stop':
 				set_updater_install_status(0, 'Starting Update...', '')
-				os.system(f'{python_exec} updater.py -u {update_data["branch_target"]} &') # Kickoff Update
+				subprocess.Popen([python_exec, 'updater.py', '-u', update_data["branch_target"]]) # Kickoff Update
 				return render_template('updater-status.html', page_theme=settings['globals']['page_theme'],
 									grill_name=settings['globals']['grill_name'])
 			else:
@@ -3483,9 +3482,9 @@ def _paginate_list(datalist, sortkey='', reversesortorder=False, itemsperpage=10
 
 def _get_cookfilelist(folder=HISTORY_FOLDER):
 	# Grab list of Historical Cook Files
-	if not os.path.exists(folder):
-		os.mkdir(folder)
-	dirfiles = os.listdir(folder)
+	folder_path = Path(folder)
+	folder_path.mkdir(exist_ok=True)
+	dirfiles = [f for f in folder_path.iterdir() if f.is_file()]
 	cookfiles = []
 	for file in dirfiles:
 		if file.endswith('.pifire'):
@@ -3495,7 +3494,7 @@ def _get_cookfilelist(folder=HISTORY_FOLDER):
 def _get_cookfilelist_details(cookfilelist):
 	cookfiledetails = []
 	for item in cookfilelist:
-		filename = HISTORY_FOLDER + item['filename']
+		filename = HISTORY_FOLDER / item['filename']
 		cookfiledata, status = read_json_file_data(filename, 'metadata')
 		if(status == 'OK'):
 			thumbnail = unpack_thumb(cookfiledata['thumbnail'], filename) if ('thumbnail' in cookfiledata) else ''
@@ -3506,14 +3505,11 @@ def _get_cookfilelist_details(cookfilelist):
 
 def _get_recipefilelist(folder=RECIPE_FOLDER):
 	# Grab list of Recipe Files
-	if not os.path.exists(folder):
-		os.mkdir(folder)
-	dirfiles = os.listdir(folder)
-	recipefiles = []
-	for file in dirfiles:
-		if file.endswith('.pfrecipe'):
-			recipefiles.append(file)
-	return(recipefiles)
+    folder_path = Path(folder)
+    folder_path.mkdir(exist_ok=True)
+    
+    recipefiles = [f.name for f in folder_path.iterdir() if f.suffix == '.pfrecipe']
+    return recipefiles
 
 def _get_recipefilelist_details(recipefilelist):
 	recipefiledetails = []
@@ -3649,17 +3645,17 @@ def _str_td(td):
 def _zip_files_dir(dir_name):
 	memory_file = BytesIO()
 	with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
-		for root, dirs, files in os.walk(dir_name):
-			for file in files:
-				zipf.write(os.path.join(root, file))
+		for file_path in Path(dir_name).rglob('*'):
+			if file_path.is_file():
+				zipf.write(file_path)
 	memory_file.seek(0)
 	return memory_file
 
 def _zip_files_logs(dir_name):
 	time_now = datetime.datetime.now()
 	time_str = time_now.strftime('%m-%d-%y_%H%M%S') # Truncate the microseconds
-	file_name = f'/tmp/PiFire_Logs_{time_str}.zip'
-	directory = pathlib.Path(f'{dir_name}')
+	file_name = Path('/tmp') / f'PiFire_Logs_{time_str}.zip'
+	directory = Path(dir_name)
 	with zipfile.ZipFile(file_name, "w", zipfile.ZIP_DEFLATED) as archive:
 		for file_path in directory.rglob("*.log"):
 			archive.write(file_path, arcname=file_path.relative_to(directory))
@@ -3843,11 +3839,11 @@ def post_app_data(action=None, type=None, json_data=None):
 			return {'response': {'result':'success'}}
 		elif type == 'clear_events':
 			write_log('Clearing Events Log.')
-			os.system('rm /tmp/events.log')
+			subprocess.run(['rm', '-f', '/tmp/events.log'])
 			return {'response': {'result':'success'}}
 		elif type == 'clear_pelletdb':
 			write_log('Clearing Pellet Database.')
-			os.system('rm pelletdb.json')
+			subprocess.run(['rm', '-f', 'pelletdb.json'])
 			return {'response': {'result':'success'}}
 		elif type == 'clear_pelletdb_log':
 			pelletdb = read_pellet_db()
@@ -3858,7 +3854,7 @@ def post_app_data(action=None, type=None, json_data=None):
 		elif type == 'factory_defaults':
 			read_history(0, flushhistory=True)
 			read_control(flush=True)
-			os.system('rm settings.json')
+			subprocess.run(['rm', '-f', 'settings.json'])
 			settings = default_settings()
 			control = default_control()
 			write_settings(settings)
@@ -3867,11 +3863,11 @@ def post_app_data(action=None, type=None, json_data=None):
 			return {'response': {'result':'success'}}
 		elif type == 'reboot':
 			write_log("Admin: Reboot")
-			os.system("sleep 3 && sudo reboot &")
+			subprocess.Popen(['sh', '-c', 'sleep 3 && sudo reboot'], start_new_session=True)
 			return {'response': {'result':'success'}}
 		elif type == 'shutdown':
 			write_log("Admin: Shutdown")
-			os.system("sleep 3 && sudo shutdown -h now &")
+			subprocess.Popen(['sh', '-c', 'sleep 3 && sudo shutdown -h now'], start_new_session=True)
 			return {'response': {'result':'success'}}
 		elif type == 'restart':
 			write_log("Admin: Restart Server")

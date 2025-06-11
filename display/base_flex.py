@@ -18,7 +18,7 @@ PiFire Flexible Display Interface Library
 import time
 import logging
 import socket
-import os
+import subprocess
 import requests
 from display.flexobject import *
 from PIL import Image
@@ -782,7 +782,7 @@ class DisplayBase:
             }
             write_control(data, origin='display')
             if self.real_hardware:
-                os.system('sleep 3 && sudo reboot &')
+                subprocess.Popen(['sleep', '3', '&&', 'sudo', 'reboot'])
             else:
                 pass
             self.display_active = 'dash'
@@ -796,7 +796,7 @@ class DisplayBase:
             }
             write_control(data, origin='display')
             if self.real_hardware:
-                os.system('sleep 3 && sudo shutdown -h now &')
+                subprocess.Popen(['sleep', '3', '&&', 'sudo', 'shutdown', '-h', 'now'])
             else:
                 pass
             self.display_active = 'dash'
@@ -810,7 +810,7 @@ class DisplayBase:
             }
             write_control(data, origin='display')
             if self.real_hardware:
-                os.system('sleep 3 && sudo service supervisor restart &')
+                subprocess.Popen(['sleep', '3', '&&', 'sudo', 'service', 'supervisor', 'restart'])
             else:
                 pass 
             self.display_active = 'dash'

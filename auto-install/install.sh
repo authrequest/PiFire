@@ -90,7 +90,7 @@ if [ "$1" = "-dev" ]; then
 else
     echo "Cloning main branch..."
     # Use a shallow clone to reduce download size
-    $SUDO git clone --depth 1 https://github.com/nebhead/pifire
+    $SUDO git clone --depth 1 https://github.com/authrequest/PiFire
 fi
 
 # Setup Python VENV & Install Python dependencies

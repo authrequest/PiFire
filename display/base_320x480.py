@@ -16,7 +16,7 @@ PiFire Display Interface Library
 '''
  Imported Libraries
 '''
-import os
+import subprocess
 import time
 import socket
 import qrcode
@@ -1163,11 +1163,11 @@ class DisplayBase:
 
 					if 'Off' in selected:
 						self.display_text('Shutting Down...')
-						os.system('sleep 3 && sudo shutdown -h now &')
+						subprocess.Popen(['sleep', '3', '&&', 'sudo', 'shutdown', '-h', 'now'])
 					#elif 'Restart' in selected:
 					else:
 						self.display_text('Restarting...')
-						os.system('sleep 3 && sudo reboot &')
+						subprocess.Popen(['sleep', '3', '&&', 'sudo', 'reboot'])
 
 					self.display_command = None
 					self.menu['current']['mode'] = 'none'
